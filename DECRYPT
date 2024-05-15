@@ -1,0 +1,85 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <openssl/pem.h>
+#include <openssl/rsa.h>
+#include <openssl/err.h>
+
+#define PRIV_KEYFILE "private.pem"
+#define BUFFER_SIZE 256
+
+void print_hex(unsigned char *data, int length) {
+    for (int i = 0; i < length; i++) {
+        printf("%02x", data[i]);
+    }
+    printf("\n");
+}
+
+RSA *load_private_key(const char *filename) {
+    FILE *fp = fopen(filename, "rb");
+    if (fp == NULL) {
+        fprintf(stderr, "Unable to open private key file %s\n", filename);
+        return NULL;
+    }
+
+    RSA *rsa = PEM_read_RSAPrivateKey(fp, NULL, NULL, NULL);
+    fclose(fp);
+    if (rsa == NULL) {
+        fprintf(stderr, "Error reading private key from %s\n", filename);
+        ERR_print_errors_fp(stderr);
+    }
+    return rsa;
+}
+
+int decrypt_message(RSA *rsa, const unsigned char *ciphertext, int ciphertext_len, unsigned char *plaintext) {
+    int result = RSA_private_decrypt(ciphertext_len,
+                                     ciphertext, plaintext, rsa, RSA_PKCS1_OAEP_PADDING);
+    if (result == -1) {
+        ERR_print_errors_fp(stderr);
+        return -1;
+    }
+    return result;
+}
+
+int main() {
+    unsigned char ciphertext[BUFFER_SIZE];
+    unsigned char decryptedtext[BUFFER_SIZE];
+    int ciphertext_len;
+
+    printf("Enter the ciphertext in hex format: ");
+    char hex_input[BUFFER_SIZE * 2 + 1];
+    if (fgets(hex_input, sizeof(hex_input), stdin) == NULL) {
+        fprintf(stderr, "Error reading input\n");
+        return EXIT_FAILURE;
+    }
+
+    // Remove newline character from input if present
+    size_t len = strlen(hex_input);
+    if (len > 0 && hex_input[len - 1] == '\n') {
+        hex_input[len - 1] = '\0';
+    }
+
+    // Convert hex input to binary
+    ciphertext_len = strlen(hex_input) / 2;
+    for (int i = 0; i < ciphertext_len; i++) {
+        sscanf(&hex_input[i * 2], "%2hhx", &ciphertext[i]);
+    }
+
+    RSA *rsa = load_private_key(PRIV_KEYFILE);
+    if (rsa == NULL) {
+        return EXIT_FAILURE;
+    }
+
+    int decrypted_length = decrypt_message(rsa, ciphertext, ciphertext_len, decryptedtext);
+    if (decrypted_length == -1) {
+        fprintf(stderr, "Error decrypting message\n");
+        RSA_free(rsa);
+        return EXIT_FAILURE;
+    }
+
+    decryptedtext[decrypted_length] = '\0'; // Null-terminate the decrypted text
+    printf("Decrypted message: %s\n", decryptedtext);
+
+    RSA_free(rsa);
+    return EXIT_SUCCESS;
+}
